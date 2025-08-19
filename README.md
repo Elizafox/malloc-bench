@@ -4,12 +4,13 @@ This is a benchmark for checking contention on malloc in a multi-threaded contex
 
 Usage
 =====
-```./bench [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS]```
+```./bench [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS] [-b BINS]```
 
 Parameters:
 * `-t`: number of threads to run (default: `sysconf`'s `_SC_NPROCESSORS_ONLN`)
 * `-c`: number of allocations per batch (default: 64)
 * `-n`: number of batches to run (default: 16384)
+* `-b`: bins to use for allocations (default: 32, 1024, 32768, 1048576)
 
 Methodology
 ===========

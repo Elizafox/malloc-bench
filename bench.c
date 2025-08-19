@@ -27,13 +27,11 @@
 #include <time.h>
 
 static int rand_fd = -1;
+
 static pthread_barrier_t start_barrier;
 
-// Allocation bins (bytes)
-static const size_t alloc_bins[] = {
-	32, 1024, 32768, 1048576,
-};
-static const size_t alloc_bin_count = sizeof(alloc_bins) / sizeof(alloc_bins[0]);
+static size_t *alloc_bins;		// Allocation bins (bytes)
+static size_t alloc_bin_count = 0;	// Number of bins
 
 static size_t concurrent_allocs = 0;	// Number of simultaneous allocations
 static size_t max_allocs = 0;		// Maximum total number of allocations
@@ -102,6 +100,62 @@ static inline int parse_size(const char *s, size_t *out) {
 	return 0;
 }
 
+static size_t *parse_csv_sizes(const char *arg, size_t *count_out)
+{
+	if(!arg)
+	{
+		return NULL;
+	}
+
+	char *buf = strdup(arg);
+	if(!buf)
+	{
+		return NULL;
+	}
+
+	size_t cap = 8, count = 0;
+	size_t *arr = malloc(cap * sizeof(*arr));
+	if(!arr)
+	{
+		free(buf);
+		return NULL;
+	}
+
+	char *saveptr = NULL;
+	char *token = strtok_r(buf, ",", &saveptr);
+
+	while(token)
+	{
+		size_t val;
+		if(parse_size(token, &val) != 0)
+		{
+			free(arr);
+			free(buf);
+			return NULL;
+		}
+
+		if(count == cap)
+		{
+			cap *= 2;
+			size_t *tmp = realloc(arr, cap * sizeof *tmp);
+			if(!tmp)
+			{
+				free(arr);
+				free(buf);
+				return NULL;
+			}
+			arr = tmp;
+		}
+
+		arr[count++] = val;
+		token = strtok_r(NULL, ",", &saveptr);
+	}
+
+	free(buf);
+	*count_out = count;
+	return arr;
+}
+
 void* allocate_thread(void* arg)
 {
 	int ret = pthread_barrier_wait(&start_barrier);
@@ -153,9 +207,11 @@ void* allocate_thread(void* arg)
 	return NULL;
 }
 
-static void bad_arg(const char *arg0)
+[[noreturn]] static void bad_arg(const char *arg0)
 {
-	fprintf(stderr, "Usage: %s [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS]\n", arg0);
+	fprintf(stderr,
+		"Usage: %s [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS] [-b BINS]\n",
+		arg0);
 	exit(EXIT_FAILURE);
 }
 
@@ -165,7 +221,7 @@ int main(int argc, char *argv[])
 
 	int c, ret;
 	size_t num_bins = 0;
-	while((c = getopt(argc, argv, "t:c:n:")) != -1)
+	while((c = getopt(argc, argv, "t:c:n:b:")) != -1)
 	{
 		switch(c)
 		{
@@ -173,7 +229,7 @@ int main(int argc, char *argv[])
 			ret = parse_size(optarg, &nthreads);
 			if(ret != 0)
 			{
-				fprintf(stderr, "Number of threads must be an integer > 0 < %zu\n", SIZE_MAX);
+				fprintf(stderr, "Number of threads must be an integer > 0 <= %zu\n", SIZE_MAX);
 				bad_arg(argv[0]);
 				// Not reached
 			}
@@ -182,7 +238,9 @@ int main(int argc, char *argv[])
 			ret = parse_size(optarg, &concurrent_allocs);
 			if(ret != 0)
 			{
-				fprintf(stderr, "Number of concurrent allocations must be an integer > 0 < %zu\n", SIZE_MAX);
+				fprintf(stderr,
+					"Number of concurrent allocations must be an integer > 0 <= %zu\n",
+					SIZE_MAX);
 				bad_arg(argv[0]);
 				// Not reached
 			}
@@ -191,7 +249,19 @@ int main(int argc, char *argv[])
 			ret = parse_size(optarg, &num_bins);
 			if(ret != 0)
 			{
-				fprintf(stderr, "Number of concurrent allocation batches must be an integer > 0 < %zu\n", SIZE_MAX);
+				fprintf(stderr,
+					"Number of concurrent allocation batches must be an integer > 0 <= %zu\n",
+					SIZE_MAX);
+				bad_arg(argv[0]);
+				// Not reached
+			}
+			break;
+		case 'b':
+			if((alloc_bins = parse_csv_sizes(optarg, &alloc_bin_count)) == NULL)
+			{
+				fprintf(stderr,
+					"Bins must be comma-separated integers > 0 <= %zu\n",
+					SIZE_MAX);
 				bad_arg(argv[0]);
 				// Not reached
 			}
@@ -231,6 +301,16 @@ int main(int argc, char *argv[])
 	}
 
 	max_allocs = concurrent_allocs * num_bins;
+
+	if(alloc_bins == NULL || alloc_bin_count == 0)
+	{
+		alloc_bin_count = 4;
+		alloc_bins = malloc(alloc_bin_count * sizeof(*alloc_bins));
+		alloc_bins[0] = 32;
+		alloc_bins[1] = 1024;
+		alloc_bins[2] = 32768;
+		alloc_bins[3] = 1048576;
+	}
 
 	printf("Threads: %zu\n", nthreads);
 	printf("Bins: %zu (", alloc_bin_count);
