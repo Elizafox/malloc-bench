@@ -15,15 +15,16 @@
  */
 
 #include <unistd.h>
-#include <fcntl.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
 #include <pthread.h>
-#include <stdlib.h>
-#include <time.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 static int rand_fd = -1;
 static pthread_barrier_t start_barrier;
@@ -43,7 +44,7 @@ typedef struct {
 	double free_elapsed;
 } stats_t;
 
-static inline void rand_size(uint8_t *data, size_t len)
+static inline void rand_bytes(uint8_t *data, size_t len)
 {
 	if(read(rand_fd, data, len) != (ssize_t)len)
 	{
@@ -52,7 +53,7 @@ static inline void rand_size(uint8_t *data, size_t len)
 	}
 }
 
-static inline size_t generate_rng_size_t_range(size_t min, size_t max)
+static inline size_t generate_rng_size_range(size_t min, size_t max)
 {
 	size_t range = max - min + 1;
 	size_t x;
@@ -61,10 +62,44 @@ static inline size_t generate_rng_size_t_range(size_t min, size_t max)
 
 	do
 	{
-		rand_size((uint8_t *)&x, sizeof(x));
+		rand_bytes((uint8_t *)&x, sizeof(x));
 	} while(x >= limit);
 
 	return min + (x % range);
+}
+
+static inline int parse_size(const char *s, size_t *out) {
+	if(!s || !*s)
+	{
+		return -1;
+	}
+
+	if(s[0] == '+' || s[0] == '-')
+	{
+		return -1;
+	}
+
+	errno = 0;
+	char *end = NULL;
+	unsigned long long v = strtoull(s, &end, 10);
+
+	if(errno == ERANGE || v > SIZE_MAX)
+	{
+		return -1;
+	}
+
+	if(end == s || *end != '\0')
+	{
+		return -1;
+	}
+
+	if(v == 0)
+	{
+		return -1;
+	}
+
+	*out = (size_t)v;
+	return 0;
 }
 
 void* allocate_thread(void* arg)
@@ -84,7 +119,7 @@ void* allocate_thread(void* arg)
 		uint8_t *data[concurrent_allocs];
 		struct timespec start, end;
 
-		size_t bin = generate_rng_size_t_range(0, alloc_bin_count - 1);
+		size_t bin = generate_rng_size_range(0, alloc_bin_count - 1);
 		size_t stat_idx = allocs / concurrent_allocs;
 		stat[stat_idx].bin = bin;
 
@@ -118,28 +153,53 @@ void* allocate_thread(void* arg)
 	return NULL;
 }
 
+static void bad_arg(const char *arg0)
+{
+	fprintf(stderr, "Usage: %s [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS]\n", arg0);
+	exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[])
 {
 	size_t nthreads = 0;
 
-	int c;
+	int c, ret;
 	size_t num_bins = 0;
 	while((c = getopt(argc, argv, "t:c:n:")) != -1)
 	{
 		switch(c)
 		{
 		case 't':
-			nthreads = (size_t)strtoul(optarg, NULL, 10);
+			ret = parse_size(optarg, &nthreads);
+			if(ret != 0)
+			{
+				fprintf(stderr, "Number of threads must be an integer > 0 < %zu\n", SIZE_MAX);
+				bad_arg(argv[0]);
+				// Not reached
+			}
 			break;
 		case 'c':
-			concurrent_allocs = (size_t)strtoul(optarg, NULL, 10);
+			ret = parse_size(optarg, &concurrent_allocs);
+			if(ret != 0)
+			{
+				fprintf(stderr, "Number of concurrent allocations must be an integer > 0 < %zu\n", SIZE_MAX);
+				bad_arg(argv[0]);
+				// Not reached
+			}
 			break;
 		case 'n':
-			num_bins = (size_t)strtoul(optarg, NULL, 10);
+			ret = parse_size(optarg, &num_bins);
+			if(ret != 0)
+			{
+				fprintf(stderr, "Number of concurrent allocation batches must be an integer > 0 < %zu\n", SIZE_MAX);
+				bad_arg(argv[0]);
+				// Not reached
+			}
 			break;
 		default:
-			fprintf(stderr, "Usage: %s [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS]\n", argv[0]);
-			return EXIT_FAILURE;
+			bad_arg(argv[0]);
+			break;
+			// Not reached
 		}
 	}
 
