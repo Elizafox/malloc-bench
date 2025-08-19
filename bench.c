@@ -123,6 +123,7 @@ int main(int argc, char *argv[])
 	size_t nthreads = 0;
 
 	int c;
+	size_t num_bins = 0;
 	while((c = getopt(argc, argv, "t:c:n:")) != -1)
 	{
 		switch(c)
@@ -134,7 +135,7 @@ int main(int argc, char *argv[])
 			concurrent_allocs = (size_t)strtoul(optarg, NULL, 10);
 			break;
 		case 'n':
-			max_allocs = concurrent_allocs * (size_t)strtoul(optarg, NULL, 10);
+			num_bins = (size_t)strtoul(optarg, NULL, 10);
 			break;
 		default:
 			fprintf(stderr, "Usage: %s [-t THREADS] [-c CONCURRENT_ALLOCS] [-n NUM_CONCURRENT_ALLOCS]\n", argv[0]);
@@ -164,10 +165,12 @@ int main(int argc, char *argv[])
 		concurrent_allocs = 64;
 	}
 
-	if(max_allocs == 0)
+	if(num_bins == 0)
 	{
-		max_allocs = concurrent_allocs * 16384;
+		num_bins = 16384;
 	}
+
+	max_allocs = concurrent_allocs * num_bins;
 
 	printf("Threads: %zu\n", nthreads);
 	printf("Bins: %zu (", alloc_bin_count);
