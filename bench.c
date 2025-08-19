@@ -42,6 +42,17 @@ typedef struct {
 	double free_elapsed;
 } stats_t;
 
+static inline void *xcalloc(size_t nelemb, size_t size)
+{
+	void *ptr = calloc(nelemb, size);
+	if(ptr == NULL)
+	{
+		perror("calloc");
+		exit(EXIT_FAILURE);
+	}
+	return ptr;
+}
+
 static inline void rand_bytes(uint8_t *data, size_t len)
 {
 	if(read(rand_fd, data, len) != (ssize_t)len)
@@ -140,6 +151,7 @@ static size_t *parse_csv_sizes(const char *arg, size_t *count_out)
 			size_t *tmp = realloc(arr, cap * sizeof *tmp);
 			if(!tmp)
 			{
+				perror("realloc");
 				free(arr);
 				free(buf);
 				return NULL;
@@ -339,12 +351,7 @@ int main(int argc, char *argv[])
 
 	const size_t per_thread_count = (max_allocs / concurrent_allocs) + (max_allocs % concurrent_allocs != 0);
 	size_t stats_count = nthreads * per_thread_count;
-	stats_t *stats = calloc(stats_count, sizeof(stats_t));
-	if(stats == NULL)
-	{
-		perror("calloc");
-		return EXIT_FAILURE;
-	}
+	stats_t *stats = xcalloc(stats_count, sizeof(stats_t));
 
 	pthread_attr_t attr;
 	if(pthread_attr_init(&attr) != 0)
@@ -385,21 +392,13 @@ int main(int argc, char *argv[])
 
 	double total_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 
-	double alloc_average[alloc_bin_count];
-	double free_average[alloc_bin_count];
-	double alloc_M2[alloc_bin_count];
-	double free_M2[alloc_bin_count];
-	size_t alloc_count[alloc_bin_count];
-	size_t free_count[alloc_bin_count];
-	size_t bin_count[alloc_bin_count];
-
-	memset(alloc_average, 0, sizeof(alloc_average));
-	memset(free_average, 0, sizeof(free_average));
-	memset(alloc_M2, 0, sizeof(alloc_M2));
-	memset(free_M2, 0, sizeof(free_M2));
-	memset(alloc_count, 0, sizeof(alloc_count));
-	memset(free_count, 0, sizeof(free_count));
-	memset(bin_count, 0, sizeof(bin_count));
+	double *alloc_average = xcalloc(alloc_bin_count, sizeof(*alloc_average));
+	double *free_average = xcalloc(alloc_bin_count, sizeof(*free_average));
+	double *alloc_M2 = xcalloc(alloc_bin_count, sizeof(*alloc_M2));
+	double *free_M2 = xcalloc(alloc_bin_count, sizeof(*free_M2));
+	size_t *alloc_count = xcalloc(alloc_bin_count, sizeof(*alloc_count));
+	size_t *free_count = xcalloc(alloc_bin_count, sizeof(*free_count));
+	size_t *bin_count = xcalloc(alloc_bin_count, sizeof(*bin_count));
 
 	double global_alloc_average = 0.0;
 	double global_free_average = 0.0;
@@ -483,6 +482,14 @@ int main(int argc, char *argv[])
 
 	close(rand_fd);
 	free(stats);
+	free(alloc_bins);
+	free(alloc_average);
+	free(free_average);
+	free(alloc_M2);
+	free(free_M2);
+	free(alloc_count);
+	free(free_count);
+	free(bin_count);
 
 	return EXIT_SUCCESS;
 }
